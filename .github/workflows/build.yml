@@ -17,16 +17,30 @@ jobs:
       - name: Descomprimir proyecto
         run: unzip -q XMidi_src.zip -d work
 
-      - name: Agregar libc++_shared.so desde el NDK del runner
+      - name: Compilar libxsynth (puente nuevo) y agregar libc++_shared
         run: |
+          set -e
           SRC=work/xmidi_src
           NDK="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-$ANDROID_HOME/ndk}}"
-          ARM=$(find "$NDK" -path "*sysroot/usr/lib/arm-linux-androideabi/libc++_shared.so" | head -1)
-          X86=$(find "$NDK" -path "*sysroot/usr/lib/i686-linux-android/libc++_shared.so" | head -1)
-          echo "arm: $ARM"; echo "x86: $X86"
-          test -n "$ARM" && test -n "$X86"
-          cp "$ARM" "$SRC/lib/armeabi-v7a/libc++_shared.so"
-          cp "$X86" "$SRC/lib/x86/libc++_shared.so"
+          TCROOT=$(ls -d "$NDK"/toolchains/llvm/prebuilt/* | head -1)
+          TC="$TCROOT/bin"
+          echo "NDK: $NDK"
+          # abi : prefijo del compilador : carpeta de sysroot
+          for entry in "arm64-v8a:aarch64-linux-android:aarch64-linux-android" \
+                       "armeabi-v7a:armv7a-linux-androideabi:arm-linux-androideabi"; do
+            ABI=${entry%%:*}; REST=${entry#*:}; CCP=${REST%%:*}; SYS=${REST#*:}
+            echo "=== $ABI ==="
+            "$TC/${CCP}24-clang" -shared -fPIC -O2 -Wall -Wno-deprecated-declarations \
+              -I "$SRC/native/include" -o "$SRC/lib/$ABI/libxsynth.so" "$SRC/native/xsynth.c" \
+              -L "$SRC/lib/$ABI" -lfluidsynth -lOpenSLES -llog -lm \
+              -Wl,--allow-shlib-undefined -Wl,-z,max-page-size=16384
+            echo "funciones XSynth exportadas: $("$TC/llvm-nm" -D --defined-only "$SRC/lib/$ABI/libxsynth.so" | grep -c XSynth_)"
+            CPP=$(find "$TCROOT/sysroot/usr/lib/$SYS" -maxdepth 1 -name libc++_shared.so | head -1)
+            echo "libc++: $CPP"
+            test -n "$CPP"
+            cp "$CPP" "$SRC/lib/$ABI/libc++_shared.so"
+          done
+          rm -rf "$SRC/native"
 
       - name: Descargar apktool (ultima version)
         run: |
@@ -51,4 +65,3 @@ jobs:
         with:
           name: XMidi-apk
           path: XMidi-fluid2.apk
-          
