@@ -25,7 +25,6 @@ jobs:
           TCROOT=$(ls -d "$NDK"/toolchains/llvm/prebuilt/* | head -1)
           TC="$TCROOT/bin"
           echo "NDK: $NDK"
-          # abi : prefijo del compilador : carpeta de sysroot
           for entry in "arm64-v8a:aarch64-linux-android:aarch64-linux-android" \
                        "armeabi-v7a:armv7a-linux-androideabi:arm-linux-androideabi"; do
             ABI=${entry%%:*}; REST=${entry#*:}; CCP=${REST%%:*}; SYS=${REST#*:}
@@ -40,7 +39,23 @@ jobs:
             test -n "$CPP"
             cp "$CPP" "$SRC/lib/$ABI/libc++_shared.so"
           done
-          rm -rf "$SRC/native"
+
+      - name: Preparar variantes A y B (para comparar el sonido)
+        run: |
+          set -e
+          SRC=work/xmidi_src
+          # B = motor FluidSynth 2.6 + puente ORIGINAL (solo 32 bits)
+          cp -r $SRC work/var_B
+          rm -rf work/var_B/lib work/var_B/native work/var_B/variants
+          mkdir -p work/var_B/lib/armeabi-v7a
+          cp $SRC/lib/armeabi-v7a/* work/var_B/lib/armeabi-v7a/
+          cp $SRC/variants/B_xsynth_armeabi-v7a.so work/var_B/lib/armeabi-v7a/libxsynth.so
+          # A = app como estaba antes de cambiar el motor (FluidSynth 1.0.9 + puente original)
+          cp -r $SRC work/var_A
+          rm -rf work/var_A/lib work/var_A/native work/var_A/variants
+          cp -r $SRC/variants/A_lib work/var_A/lib
+          # C (principal) sin carpetas auxiliares
+          rm -rf $SRC/native $SRC/variants
 
       - name: Descargar apktool (ultima version)
         run: |
@@ -48,20 +63,26 @@ jobs:
           echo "$URL"
           curl -sL -o apktool.jar "$URL"
 
-      - name: Compilar con apktool
-        run: java -jar apktool.jar b work/xmidi_src -o unsigned.apk
-
-      - name: Alinear y firmar
+      - name: Compilar y firmar las tres variantes
         run: |
+          set -e
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
-          "$BT/zipalign" -p -f 4 unsigned.apk aligned.apk
           keytool -genkeypair -keystore ks.jks -alias k -keyalg RSA -keysize 2048 -validity 10000 \
             -storepass android -keypass android -dname "CN=XMidi"
-          "$BT/apksigner" sign --ks ks.jks --ks-pass pass:android --key-pass pass:android \
-            --out XMidi-fluid2.apk aligned.apk
-          "$BT/apksigner" verify XMidi-fluid2.apk
+          mkdir -p out
+          build() { # nombre carpeta archivo-final
+            java -jar apktool.jar b "$2" -o "unsigned_$1.apk"
+            "$BT/zipalign" -p -f 4 "unsigned_$1.apk" "aligned_$1.apk"
+            "$BT/apksigner" sign --ks ks.jks --ks-pass pass:android --key-pass pass:android \
+              --out "out/$3" "aligned_$1.apk"
+            "$BT/apksigner" verify "out/$3"
+          }
+          build C work/xmidi_src XMidi-C-puente-nuevo.apk
+          build B work/var_B XMidi-B-motor2-puente-original.apk
+          build A work/var_A XMidi-A-original-como-antes.apk
+          ls -la out
 
       - uses: actions/upload-artifact@v4
         with:
           name: XMidi-apk
-          path: XMidi-fluid2.apk
+          path: out/*.apk
