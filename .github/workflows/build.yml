@@ -14,54 +14,17 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Descomprimir proyecto
-        run: unzip -q XMidi_src.zip -d work
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
 
-      - name: Compilar libxsynth (puente nuevo) y agregar libc++_shared
-        run: |
-          set -e
-          SRC=work/xmidi_src
-          NDK="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-$ANDROID_HOME/ndk}}"
-          TCROOT=$(ls -d "$NDK"/toolchains/llvm/prebuilt/* | head -1)
-          TC="$TCROOT/bin"
-          echo "NDK: $NDK"
-          for entry in "arm64-v8a:aarch64-linux-android:aarch64-linux-android" \
-                       "armeabi-v7a:armv7a-linux-androideabi:arm-linux-androideabi"; do
-            ABI=${entry%%:*}; REST=${entry#*:}; CCP=${REST%%:*}; SYS=${REST#*:}
-            echo "=== $ABI ==="
-            "$TC/${CCP}24-clang" -shared -fPIC -O2 -Wall -Wno-deprecated-declarations \
-              -I "$SRC/native/include" -o "$SRC/lib/$ABI/libxsynth.so" "$SRC/native/xsynth.c" \
-              -L "$SRC/lib/$ABI" -lfluidsynth -lOpenSLES -llog -lm \
-              -Wl,--allow-shlib-undefined -Wl,-z,max-page-size=16384
-            echo "funciones XSynth exportadas: $("$TC/llvm-nm" -D --defined-only "$SRC/lib/$ABI/libxsynth.so" | grep -c XSynth_)"
-            CPP=$(find "$TCROOT/sysroot/usr/lib/$SYS" -maxdepth 1 -name libc++_shared.so | head -1)
-            echo "libc++: $CPP"
-            test -n "$CPP"
-            cp "$CPP" "$SRC/lib/$ABI/libc++_shared.so"
-          done
-          rm -rf "$SRC/native"
+      - name: Compilar APK
+        run: gradle assembleDebug --no-daemon
 
-      - name: Descargar apktool (ultima version)
-        run: |
-          URL=$(curl -s https://api.github.com/repos/iBotPeaches/Apktool/releases/latest | grep browser_download_url | grep '\.jar"' | head -1 | cut -d'"' -f4)
-          echo "$URL"
-          curl -sL -o apktool.jar "$URL"
-
-      - name: Compilar con apktool
-        run: java -jar apktool.jar b work/xmidi_src -o unsigned.apk
-
-      - name: Alinear y firmar
-        run: |
-          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
-          "$BT/zipalign" -p -f 4 unsigned.apk aligned.apk
-          keytool -genkeypair -keystore ks.jks -alias k -keyalg RSA -keysize 2048 -validity 10000 \
-            -storepass android -keypass android -dname "CN=XMidi"
-          "$BT/apksigner" sign --ks ks.jks --ks-pass pass:android --key-pass pass:android \
-            --out XMidi-fluid2.apk aligned.apk
-          "$BT/apksigner" verify XMidi-fluid2.apk
+      - name: Renombrar APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk StyleGrooveMidis.apk
 
       - uses: actions/upload-artifact@v4
         with:
-          name: XMidi-apk
-          path: XMidi-fluid2.apk
-          
+          name: StyleGrooveMidis-apk
+          path: StyleGrooveMidis.apk
