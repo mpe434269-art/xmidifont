@@ -18,14 +18,23 @@ jobs:
         with:
           gradle-version: 8.7
 
+      - name: Descargar ZIP desde Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v1.0.0 \
+            --repo ${{ github.repository }} \
+            --pattern "StyleGrooveMidis-proyecto.zip" \
+            --dir .
+
       - name: Descomprimir proyecto
         run: unzip -q StyleGrooveMidis-proyecto.zip -d work
 
       - name: Buscar proyecto
         run: |
-          F=$(find work -name settings.gradle | head -1)
+          F=$(find work -name "settings.gradle" -o -name "settings.gradle.kts" | head -1)
           if [ -z "$F" ]; then
-            echo "No hay settings.gradle dentro del zip."
+            echo "No hay settings.gradle ni settings.gradle.kts dentro del zip."
             ls -R work | head -50
             exit 1
           fi
